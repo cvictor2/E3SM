@@ -238,7 +238,7 @@ contains
 !
 !-----------------------------------------------------------------------
 
-   subroutine ocn_tend_vel(tendPool, statePool, forcingPool, &
+   subroutine ocn_tend_vel(tendPool, statePool, forcingPool, timeVaryingForcingPool, &
                            timeLevelIn, dt)!{{{
 
       !-----------------------------------------------------------------
@@ -262,6 +262,7 @@ contains
 
       type (mpas_pool_type), intent(inout) :: &
          tendPool,          &!< [out] Tendency structure w/ vel tend
+         timeVaryingForcingPool, &         !< [out] Forcing structure w/ sfc stresses
          forcingPool         !< [out] Forcing structure w/ sfc stresses
 
       real (kind=RKIND), dimension(:,:), pointer, contiguous :: &
@@ -429,7 +430,7 @@ contains
 
 
       ! Add AOT forcing
-!      call ocn_vel_aot_tend(forcingPool, tendVel, err)
+      call ocn_vel_aot_tend(timeVaryingForcingPool, tendVel, err)
 
       ! vertical mixing treated implicitly in a later routine
       ! adjust total velocity tendency based on wetting/drying

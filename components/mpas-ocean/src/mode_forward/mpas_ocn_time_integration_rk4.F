@@ -885,7 +885,7 @@ module ocn_time_integration_rk4
       integer, intent(out) :: err
 
       type (mpas_pool_type), pointer :: meshPool, verticalMeshPool
-      type (mpas_pool_type), pointer :: statePool, forcingPool
+      type (mpas_pool_type), pointer :: statePool, forcingPool, timeVaryingForcingPool
       type (mpas_pool_type), pointer :: scratchPool, tendPool, provisStatePool
       type (mpas_pool_type), pointer :: swForcingPool, tracersPool
 
@@ -903,6 +903,7 @@ module ocn_time_integration_rk4
       call mpas_pool_get_subpool(block % structs, 'verticalMesh', verticalMeshPool)
       call mpas_pool_get_subpool(block % structs, 'state', statePool)
       call mpas_pool_get_subpool(block % structs, 'forcing', forcingPool)
+      call mpas_pool_get_subpool(block % structs, 'timeVaryingForcing', timeVaryingForcingPool)
       call mpas_pool_get_subpool(block % structs, 'scratch', scratchPool)
       call mpas_pool_get_subpool(block % structs, 'tend', tendPool)
       call mpas_pool_get_subpool(block % structs, 'provis_state', provisStatePool)
@@ -934,7 +935,7 @@ module ocn_time_integration_rk4
           call ocn_filter_btr_mode_tend_vel(tendPool, provisStatePool, meshPool, 1)
       endif
 
-      call ocn_tend_tracer(tendPool, provisStatePool, forcingPool, meshPool, swForcingPool, &
+      call ocn_tend_tracer(tendPool, provisStatePool, forcingPool,timeVaryingForcingPool, meshPool, swForcingPool, &
                            dt, activeTracersOnlyIn=.false., timeLevelIn=1)
 
    end subroutine ocn_time_integrator_rk4_compute_tracer_tends!}}}
@@ -1012,7 +1013,7 @@ module ocn_time_integration_rk4
           call ocn_filter_btr_mode_tend_vel(tendPool, provisStatePool, meshPool, 1)
       endif
 
-      call ocn_tend_tracer(tendPool, provisStatePool, forcingPool, meshPool, swForcingPool, &
+      call ocn_tend_tracer(tendPool, provisStatePool, forcingPool, timeVaryingForcingPool, meshPool, swForcingPool, &
                            dt, activeTracersOnlyIn=.false., timeLevelIn=1)
 
    end subroutine ocn_time_integrator_rk4_compute_tends!}}}

@@ -27,7 +27,7 @@ module ocn_vel_forcing
    use ocn_vel_forcing_surface_stress
    use ocn_vel_forcing_explicit_bottom_drag
    use ocn_vel_forcing_topographic_wave_drag
-   use ocn_vel_aot
+   use ocn_aot
 
    implicit none
    private

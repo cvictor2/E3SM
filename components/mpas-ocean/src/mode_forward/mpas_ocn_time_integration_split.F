@@ -1493,7 +1493,7 @@ module ocn_time_integration_split
          call mpas_timer_stop("se halo thickness")
 
          call mpas_timer_start('se tracer tend', .false.)
-         call ocn_tend_tracer(tendPool, statePool, forcingPool, &
+         call ocn_tend_tracer(tendPool, statePool, forcingPool, timeVaryingForcingPool, &
                               meshPool, swForcingPool, &
                               dt, activeTracersOnly, 2)
 

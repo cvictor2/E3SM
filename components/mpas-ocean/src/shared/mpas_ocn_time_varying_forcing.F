@@ -32,7 +32,8 @@ module ocn_time_varying_forcing
        ocn_time_varying_forcing_init, &
        ocn_time_varying_forcing_get, &
        ocn_time_varying_forcing_write_restart_times, &
-       ocn_time_varying_forcing_aot_obs_update
+       ocn_time_varying_forcing_aot_obs_update_vel, &
+       ocn_time_varying_forcing_aot_obs_update_tracers
 
 contains
 
@@ -704,6 +705,39 @@ contains
     
     end select
 
+    
+    if (config_use_aot_salt) then
+    ! salinityObs init
+    call MPAS_forcing_init_field(&
+         domain % streamManager, &               ! streamManager
+         forcingGroupHead, &                     ! forcingGroupHead
+         "ocn_aot_forcing", &            ! forcingGroupName
+         "salinityObs", &                         ! forcingName
+         "aot_forcing_salt", &                ! forcingStreamID
+         "timeVaryingForcing", &                 ! poolname
+         "salinityObs", &                         ! fieldname
+         config_time_varying_aot_forcing_type, &                             ! interpolationType
+         config_time_varying_aot_forcing_reference_time, &                 ! forcingReferenceTimeStr
+         config_time_varying_aot_forcing_interval, &                      ! forcingIntervalStr
+         "next")                                ! forcingInitializationType
+
+    endif
+    if (config_use_aot_temp) then
+    ! salinityObs init
+    call MPAS_forcing_init_field(&
+         domain % streamManager, &               ! streamManager
+         forcingGroupHead, &                     ! forcingGroupHead
+         "ocn_aot_forcing", &            ! forcingGroupName
+         "temperatureObs", &                         ! forcingName
+         "aot_forcing_temp", &                ! forcingStreamID
+         "timeVaryingForcing", &                 ! poolname
+         "temperatureObs", &                         ! fieldname
+         config_time_varying_aot_forcing_type, &                             ! interpolationType
+         config_time_varying_aot_forcing_reference_time, &                 ! forcingReferenceTimeStr
+         config_time_varying_aot_forcing_interval, &                      ! forcingIntervalStr
+         "next")                                ! forcingInitializationType
+    endif
+
     call MPAS_forcing_init_field_data(&
          forcingGroupHead, &                     ! forcingGroupHead
          "ocn_aot_forcing", &            ! forcingGroupName
@@ -799,7 +833,7 @@ contains
 !
 !-----------------------------------------------------------------------
 
-  subroutine ocn_time_varying_forcing_aot_obs_update(timeVaryingForcingPool, statePool)!{{{
+  subroutine ocn_time_varying_forcing_aot_obs_update_vel(timeVaryingForcingPool, statePool)!{{{
     !------------------------------------------------------------------
     ! input variables
     !------------------------------------------------------------------
@@ -837,7 +871,62 @@ contains
     velocityZonalObs = velocityZonal
     velocityMeridionalObs = velocityMeridional
   end select
-  end subroutine ocn_time_varying_forcing_aot_obs_update!}}}
+  end subroutine ocn_time_varying_forcing_aot_obs_update_vel!}}}
+
+
+
+  subroutine ocn_time_varying_forcing_aot_obs_update_tracers(timeVaryingForcingPool,tracers, saltInd, tempInd, nCellsSolve, minLevelCell, maxLevelCell, nVertLevels)!{{{
+    !------------------------------------------------------------------
+    ! input variables
+    !------------------------------------------------------------------
+    real (kind=RKIND), dimension(:,:,:), pointer,  intent(in) :: tracers
+    integer, dimension(:), intent(in) :: minLevelCell, maxLevelCell
+    integer, intent(in) :: saltInd, tempInd, nCellsSolve, nVertLevels
+    type (mpas_pool_type), intent(inout) :: timeVaryingForcingPool
+  
+    !------------------------------------------------------------------
+    ! local variables
+    !------------------------------------------------------------------
+    integer :: iCell, iLevel
+    real (kind=RKIND), dimension(:,:), pointer :: &
+      salinityObs,  & !< [in] meridional velocity at cell centers
+      temperatureObs  !< [in] zonal velocity at cell centers    
+
+    real(kind=RKIND), target :: saltCell, tempCell
+
+!  write(*,*) "Started AOT observation generator routine for tracers" 
+  if (.not. config_aot_obs_gen) return
+
+!  write(*,*) "Test salinity:"
+!  write(*,*) saltInd 
+  if (associated(tracers)) then
+!    write(*,*) "Tracer is associated"  
+!  call mpas_log_write("Testing Salinity: ", MPAS_LOG_WARN, realArgs = (/ tracers(saltInd, 2, 2)))
+!    if (config_use_aot_salt) then
+      call mpas_pool_get_array(timeVaryingForcingPool, 'salinityObs', salinityObs)
+!      write(*,*) salinityObs(1,1)
+      salinityObs = tracers(saltInd,:,:)
+!      write(*,*) salinityObs(1,1)
+  !    do iCell=1,nCellsSolve
+  !      do iLevel=minLevelCell(iCell), maxLevelCell(iCell)
+  !!        saltCell = tracers(saltInd,iLevel,iCell)
+  !!        salinityObs(iLevel, iCell) => saltCell
+  !        salinityObs(iLevel, iCell) = tracers(saltInd,iLevel,iCell)
+  !      enddo
+  !    enddo
+    endif
+!    write(*,*) "Test temperature:"
+!    write(*,*) tracers(tempInd, 2,2)
+    if (config_use_aot_temp) then
+      call mpas_pool_get_array(timeVaryingForcingPool, 'temperatureObs', temperatureObs)
+  !        tempCell = tracers(tempInd,iLevel,iCell)
+  !        temperatureObs(iLevel, iCell) => tempCell
+          temperatureObs = tracers(tempInd,:,:)
+    endif
+!  endif
+  end subroutine ocn_time_varying_forcing_aot_obs_update_tracers!}}}
+
+
 
 end module ocn_time_varying_forcing
 ! vim: foldmethod=marker

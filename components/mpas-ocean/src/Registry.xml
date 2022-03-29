@@ -684,10 +684,6 @@
 			description="If true calculate input forcing fields."
 			possible_values=".true. or .false."
 		/>
-		<nml_option name="config_time_varying_aot_forcing_edges" type="logical" default_value=".false." units="unitless"
-			description="If true use normalVelocity to force on edges."
-			possible_values=".true. or .false."
-		/>
 		<nml_option name="config_aot_obs_gen" type="logical" default_value=".false." units="unitless"
 			description="If true don't attempt to load aot forcing, instead generate observational data from diagnostic variables."
 			possible_values=".true. or .false."
@@ -1003,11 +999,27 @@
 					description="Dimensionless bottom drag coefficient, $c_{drag}$."
 					possible_values="any positive real, typically 1.0e-3"
 		/>
-		<nml_option name="config_use_aot" type="logical" default_value=".false." units="unitless"
+		<nml_option name="config_use_aot_vel" type="logical" default_value=".false." units="unitless"
 					description="If true, AOT forcing is used on the momentum equation."
 					possible_values=".true. or .false."
 		/>
-		<nml_option name="config_aot_coeff" type="real" default_value="1.0e-3" units="unitless"
+		<nml_option name="config_use_aot_salt" type="logical" default_value=".false." units="unitless"
+					description="If true, AOT forcing is used on the tracers salinity equation."
+					possible_values=".true. or .false."
+		/>
+		<nml_option name="config_use_aot_temp" type="logical" default_value=".false." units="unitless"
+					description="If true, AOT forcing is used on the tracers temperature equation."
+					possible_values=".true. or .false."
+		/>
+		<nml_option name="config_aot_coeff_vel" type="real" default_value="1.0e-3" units="unitless"
+					description="Feedback control parameter, mu, for AOT algorithm."
+					possible_values="any positive real."
+		/>
+		<nml_option name="config_aot_coeff_salt" type="real" default_value="1.0e-3" units="unitless"
+					description="Feedback control parameter, mu, for AOT algorithm."
+					possible_values="any positive real."
+		/>
+		<nml_option name="config_aot_coeff_temp" type="real" default_value="1.0e-3" units="unitless"
 					description="Feedback control parameter, mu, for AOT algorithm."
 					possible_values="any positive real."
 		/>
@@ -1318,6 +1330,10 @@
 		/>
 		<nml_option name="config_compute_active_tracer_budgets" type="logical" default_value=".true." units="unitless"
 					description="Enables the computation of tracer budget terms"
+					possible_values=".true. or .false."
+		/>
+		<nml_option name="config_disable_tracers_aot" type="logical" default_value=".false." units="unitless"
+					description="Disables tendencies on the velocity field from AOT"
 					possible_values=".true. or .false."
 		/>
 		<nml_option name="config_disable_thick_all_tend" type="logical" default_value=".false." units="unitless"
@@ -1886,6 +1902,24 @@
 				packages="timeVaryingAOTForcingPKG"
 				immutable="true">
 			<var name="normalVelocityObs"/>
+		</stream>
+		<stream name="aot_forcing_salt"
+				type="input"
+				filename_template="aot_forcing/aot_forcing.$Y-$M-$D.nc"
+				filename_interval="0000-00-01_00:00:00"
+				input_interval="0000-00-01_00:00:00"
+				packages="timeVaryingAOTForcingPKG"
+				immutable="true">
+			<var name="salinityObs"/>
+		</stream>
+		<stream name="aot_forcing_temp"
+				type="input"
+				filename_template="aot_forcing/aot_forcing.$Y-$M-$D.nc"
+				filename_interval="0000-00-01_00:00:00"
+				input_interval="0000-00-01_00:00:00"
+				packages="timeVaryingAOTForcingPKG"
+				immutable="true">
+			<var name="temperatureObs"/>
 		</stream>
 <!--
 		<stream name="aot_mask"
@@ -3625,6 +3659,14 @@
 			 packages="timeVaryingAOTForcingPKG"
 		/>
 		<var name="normalVelocityObs" type="real" dimensions="nVertLevels nEdges Time" units="m s^{-1}"
+			 description="normal velocity observed at cell edges"
+			 packages="timeVaryingAOTForcingPKG"
+		/>
+		<var name="salinityObs" type="real" dimensions="nVertLevels nCells Time" units="m s^{-1}"
+			 description="normal velocity observed at cell edges"
+			 packages="timeVaryingAOTForcingPKG"
+		/>
+		<var name="temperatureObs" type="real" dimensions="nVertLevels nCells Time" units="m s^{-1}"
 			 description="normal velocity observed at cell edges"
 			 packages="timeVaryingAOTForcingPKG"
 		/>

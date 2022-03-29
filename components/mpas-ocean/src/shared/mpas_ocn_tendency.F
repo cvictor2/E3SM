@@ -63,7 +63,7 @@ module ocn_tendency
    use ocn_vmix
    use ocn_wetting_drying
    use ocn_vel_tidal_potential
-   use ocn_vel_aot
+   use ocn_aot
 
    implicit none
    private
@@ -430,7 +430,7 @@ contains
 
 
       ! Add AOT forcing
-      call ocn_vel_aot_tend(timeVaryingForcingPool, normalVelocity, statePool, forcingPool, tendVel, err)
+      call ocn_aot_vel_tend(timeVaryingForcingPool, normalVelocity, statePool, forcingPool, tendVel, err)
 
       ! vertical mixing treated implicitly in a later routine
       ! adjust total velocity tendency based on wetting/drying
@@ -486,7 +486,7 @@ contains
 !-----------------------------------------------------------------------
 
    subroutine ocn_tend_tracer(tendPool, statePool, forcingPool, &
-                              meshPool, swForcingPool, &
+                              timeVaryingForcingPool, meshPool, swForcingPool, &
                               dt, activeTracersOnlyIn, timeLevelIn )!{{{
 
       !-----------------------------------------------------------------
@@ -516,6 +516,7 @@ contains
 
       type (mpas_pool_type), intent(inout) :: &
          forcingPool,   &!< [inout] forcing data
+         timeVaryingForcingPool,   &!< [inout] forcing data
          swForcingPool, &!< [inout] shortwave forcing data
          tendPool        !< [inout] Tendency terms for all variables
 
@@ -907,6 +908,8 @@ contains
 
          endif ! sfc restoring
 
+
+
          ! tracer fluxes at the land-ice / ocean interface
          ! this is a flux at the top ocean surface -- so these
          ! fluxes are added into tracerGroupSurfaceFlux
@@ -1227,6 +1230,16 @@ contains
          call ocn_frazil_forcing_tracers(meshPool, tracersPool, &
                      groupName, forcingPool, tracerGroupTend, err)
 
+         if (.not. config_disable_tracers_aot) then
+            call mpas_pool_get_array(tracersPool, 'activeTracers', &
+                                     activeTracers, timeLevel)
+            call ocn_aot_tracers_tend(timeVaryingForcingPool,       &
+                                      activeTracers, indxSalt,      &
+                                      indxTemp, nCellsOwned,        &
+                                      minLevelCell, maxLevelCell,   &
+                                      nVertLevels, tracerGroupTend, &
+                                      err)
+         endif
 
       end if ! config use flag on
       end if ! active only

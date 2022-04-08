@@ -44,6 +44,8 @@ module ocn_time_integration_split
 
    use ocn_effective_density_in_land_ice
 
+   use ocn_aot
+   use ocn_time_varying_forcing
    implicit none
    private
    save
@@ -246,6 +248,12 @@ module ocn_time_integration_split
 
       ! Forcing pool
       real (kind=RKIND), dimension(:), pointer :: tidalPotentialEta
+
+
+      real (kind=RKIND) :: aotDiv
+
+      real (kind=RKIND), dimension(:,:), pointer :: &
+         aotVel                  ! baroclinic vel at current time
 
       ! These are public variables used from the diagnostics module
       ! indexSurfaceVelocityZonal, indexSurfaceVelocityMeridional
@@ -1737,6 +1745,7 @@ module ocn_time_integration_split
                         !$omp end do
                         !$omp end parallel
                      end if
+!!! Add AOT stuff for tracers here
 
                      ! Reset debugTracers to fixed value at the surface
                      if (trim(groupItr % memberName) == &
@@ -1836,10 +1845,38 @@ module ocn_time_integration_split
                                normalBarotropicVelocityNew(iEdge) + &
                              2*normalBaroclinicVelocityNew(k,iEdge) - &
                                normalBaroclinicVelocityCur(k,iEdge)
+!Maybe here? AOT term
             end do
             end do ! iEdges
             !$omp end do
             !$omp end parallel
+
+            write(*,*) "Started AOT term generation"
+            if(config_use_aot_vel .and. not(config_aot_obs_gen)) then
+            call ocn_aot_forcing_vel(timeVaryingForcingPool, normalVelocityNew, statePool, forcingPool, aotVel, err)
+            select case (trim(config_aot_scheme))
+            case('implicit')
+              aotDiv = 1.0_RKIND/(1.0_RKIND + dt*config_aot_coeff_vel) 
+            case('explicit')
+              aotDiv = 1.0_RKIND
+            endselect
+
+            write(*,*) "Finished AOT term generation, applying term."
+            !$omp parallel
+            !$omp do schedule(runtime) private(k)
+            do iEdge = 1, nEdgesAll
+            do k = minLevelEdgeBot(iEdge), maxLevelEdgeTop(iEdge)
+               normalVelocityNew(k,iEdge) = (normalVelocityNew(k,iEdge) + dt*config_aot_coeff_vel*aotVel(k,iEdge))*aotDiv
+            end do
+            end do ! iEdges
+            !$omp end do
+            !$omp end parallel
+            endif
+
+            write(*,*) "Finished applying AOT term."
+            if(config_aot_obs_gen) then
+              call ocn_time_varying_forcing_aot_obs_update_vel(timeVaryingForcingPool, statePool)
+            endif
 
          endif ! splitExplicitStep
 

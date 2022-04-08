@@ -46,8 +46,8 @@ module ocn_aot
 
    public :: ocn_aot_vel_tend, &
              ocn_aot_tracers_tend, &
-             ocn_vel_aot_init
-
+             ocn_vel_aot_init, &
+             ocn_aot_forcing_vel
    !--------------------------------------------------------------------
    !
    ! Private module variables
@@ -488,6 +488,355 @@ contains
 !      write(*,*) "Ended Tracers AOT Routine"
    end subroutine ocn_aot_tracers_tend!}}}
 
+!***********************************************************************
+!
+!  routine ocn_AOT_forcing_vel
+!
+!> \brief   Initializes ocean explicit bottom drag forcing
+!> \author  Mark Petersen
+!> \date    August 2017
+!> \details
+!>  This routine initializes quantities related to explicit bottom drag
+!>  in the ocean.
+!
+!-----------------------------------------------------------------------
+
+   subroutine ocn_aot_forcing_vel(timeVaryingForcingPool,normalVelocity,statePool,forcingPool,edgeArray,err) !{{{
+! If implicit, set aot_forcing_vel variable (whatever the name is) to normalVelocityObs and return
+! otherwise,  run cell_initialized(timeVaryingForcingPool, 'normalVelocityObs', aot_forcing_vel_cell, err)
+!             run cell_averaged(aot_forcing_vel)
+!             run cell_to_edge(aot_forcing_vel_cell, aot_forcing_vel)
+! aot_forcing_vel_cell is a pointer array with values per celll
+! Final result needs to be edge valued pointer array
+   !--------------------------------------------------------------------
+
+      type (mpas_pool_type), intent(in) :: timeVaryingForcingPool
+      type (mpas_pool_type), intent(in) :: statePool
+      type (mpas_pool_type), intent(in) :: forcingPool
+  
+      real (kind=RKIND), dimension(:,:), intent(inout) :: &
+         edgeArray            !< [inout] accumulated velocity tendency
+
+      integer, intent(out) :: err !< [out] error flag
+
+      real (kind=RKIND), dimension(:,:), intent(in) :: &
+         normalVelocity      !< [in] normal velocity
+
+
+
+      real (kind=RKIND), dimension(:,:), pointer :: &
+         meridionalCell, &   !< [in] interpolated meridional velocity for AOT
+         zonalCell           !< [in] interpolated meridional velocity for AOT
+
+      real (kind=RKIND), dimension(:,:), pointer :: normalVelocityObs
+      integer :: nCells
+      
+
+
+      nCells = nCellsAll
+
+      err = 0
+
+      select case (trim(config_time_varying_aot_data_type))
+      case('cells')
+      
+!        allocate(meridionalCell(nVertLevels,nCells))
+!        allocate(zonalCell(nVertLevels,nCells))
+        call calculate_cell(timeVaryingForcingPool, forcingPool, 'velocityMeridionalObs', velocityMeridional, meridionalCell, err)
+        call calculate_cell(timeVaryingForcingPool, forcingPool, 'velocityZonalObs', velocityZonal, zonalCell, err)
+        call cell_to_edge(edgeArray, meridionalCell, zonalCell, err)
+!        deallocate(meridionalCell, zonalCell)
+       case('edges')
+        call mpas_pool_get_array(timeVaryingForcingPool, 'normalVelocityObs', normalVelocityObs)
+        select case (trim(config_aot_scheme))
+        case('explicit')
+          edgeArray = normalVelocityObs - normalVelocity
+        case('implicit')
+          edgeArray = normalVelocityObs
+        endselect 
+
+
+
+      endselect
+
+
+ 
+   end subroutine ocn_aot_forcing_vel!}}}
+
+
+
+
+   subroutine calculate_cell(timeVaryingForcingPool, forcingPool, forcingName, simCellArray, cellArray, err) !{{{
+
+      type (mpas_pool_type), intent(in) :: timeVaryingForcingPool
+      type (mpas_pool_type), intent(in) :: forcingPool
+!!         KECell,        &!< [in] kinetic energy at cell
+!!         layerThickEdge  !< [in] layer thickness at edge
+!      real (kind=RKIND), dimension(:,:), pointer, intent(in) :: &
+!          velocityMeridional, &!< [in] meridional velocity at cell centers
+!          velocityZonal,       &!< [in] zonal velocity at cell centers 
+!          velocityMeridionalObs, &!< [in] meridional velocity at cell centers
+!          velocityZonalObs        !< [in] zonal velocity at cell centers 
+      character (*), intent(in) :: forcingName
+      !-----------------------------------------------------------------
+      ! input/output variables
+      !-----------------------------------------------------------------
+
+      real (kind=RKIND), dimension(:,:), pointer, intent(inout) :: &
+         cellArray  !< [inout] meridional velocity at cell centers
+
+      !-----------------------------------------------------------------
+      ! output variables
+      !-----------------------------------------------------------------
+
+      integer, intent(out) :: err !< [out] error flag
+
+      !-----------------------------------------------------------------
+      ! local variables
+      !-----------------------------------------------------------------
+
+      integer :: &
+         iEdge,      &! loop index for edge loop
+         k,          &! vertical index of lowest active layer at edge
+         j,          &! 
+         iSmooth,    &
+         iCell,      &
+         coc,        &
+         eoc,        &
+         nCells,     &
+         cell1, cell2 ! neighbor cell addresses across edge
+      real (kind=RKIND) :: aotCounterOffset
+      integer, dimension(:), allocatable :: aotLayer, counter_cells, counter_layers ! tracks cell used for aot smoothing term
+!      real (kind=RKIND), dimension(:,:), allocatable :: velocityZonalAOTNew, velocityMeridionalAOTNew
+      real (kind=RKIND), dimension(:,:), pointer :: &
+         obsCellArray !< [in] meridional velocity at cell centers
+      real (kind=RKIND), dimension(:,:), pointer :: &
+         simCellArray !< [in] meridional velocity at cell centers
+      integer, dimension(:), pointer :: aotForcingMask
+   !--------------------------------------------------------------------
+      real (kind=RKIND), dimension(:,:), allocatable :: &
+         cellArrayNew   !< [in] interpolated meridional velocity for AOT
+
+   call mpas_pool_get_array(timeVaryingForcingPool, forcingName, obsCellArray)
+        
+   call mpas_pool_get_array(forcingPool, 'aotForcingMask', aotForcingMask)
+ 
+   err = 0 
+  
+   nCells = nCellsAll
+   allocate(counter_layers(nVertLevels))
+   allocate(counter_cells(nCells))
+   allocate(aotLayer(nCells))
+  
+   allocate(cellArrayNew(nVertLevels,nCells))
+  !initialize aotLayer for non-masked cells
+      if(config_aot_scheme =="explicit") then
+        do iCell = 1, nCells
+             counter_cells(iCell) = 0
+          if(aotForcingMask(iCell) == 1) then
+             counter_cells(iCell) = 0
+             aotLayer(iCell) = 1 !non-masked cells are in the first layer, which increments by 1 going outward to neighbors
+             do k = 1, maxLevelCell(iCell)
+             cellArray(k,iCell) = obsCellArray(k,iCell) - simCellArray(k,iCell)
+             enddo !k
+             do k = maxLevelCell(iCell) + 1, nVertLevels
+               cellArray(k,iCell) = 0
+             enddo
+          else
+            aotLayer(iCell) = 0
+              do k = 1, nVertLevels
+               cellArray(k,iCell) = 0
+             enddo
+          endif !aotForcingMask(iCell)
+        enddo !iCell
+      else 
+        do iCell = 1, nCells
+             counter_cells(iCell) = 0
+          if(aotForcingMask(iCell) == 1) then
+             counter_cells(iCell) = 0
+             aotLayer(iCell) = 1 !non-masked cells are in the first layer, which increments by 1 going outward to neighbors
+             do k = 1, maxLevelCell(iCell)
+             cellArray(k,iCell) = obsCellArray(k,iCell)
+             enddo !k
+             do k = maxLevelCell(iCell) + 1, nVertLevels
+               cellArray(k,iCell) = 0
+             enddo
+          else
+            aotLayer(iCell) = 0
+              do k = 1, nVertLevels
+               cellArray(k,iCell) = 0
+             enddo
+          endif !aotForcingMask(iCell)
+        enddo !iCell
+      endif 
+        ! Nearest Neighbor initializeation
+        if(config_aot_interp_weight == "constant") then
+          aotCounterOffset = 1
+          do iSmooth = 1, config_aot_neighbor_iterations
+            do iCell = 1, nCells
+              if (aotLayer(iCell) == iSmooth) then
+                do j = 1, nEdgesOnCell(iCell)
+                  coc = cellsOnCell(j,iCell)
+                  
+                  if (coc < nCells+1) then
+                    if (aotLayer(coc) == 0 .OR. aotLayer(coc) == iSmooth + 1) then
+                      aotLayer(coc) = iSmooth + 1
+                      !counter_cells = counter_cells + 1
+                      do k = 1, min(maxLevelCell(iCell),maxLevelCell(coc)) 
+                        cellArray(k,coc) = (cellArray(k,coc)*counter_cells(coc) &
+                                                     + cellArray(k,iCell))/(counter_cells(coc)+aotCounterOffset)
+                      enddo !k
+                      counter_cells(coc) = counter_cells(coc) + aotCounterOffset
+                    endif !aotLayer(coc)
+                  endif !coc
+                enddo !j
+              endif !aotLayer(iCell)
+            enddo !iCell
+            ! HALO update here if more than 3 iterations
+          enddo !iSmooth
+        else if(config_aot_interp_weight == "geometric") then
+          do iSmooth = 1, config_aot_neighbor_iterations
+            do iCell = 1, nCells
+              if (aotLayer(iCell) == iSmooth) then
+                do j = 1, nEdgesOnCell(iCell)
+                  coc = cellsOnCell(j,iCell)
+                  eoc = edgesOnCell(j,iCell)
+                  if (coc < nCells+1) then
+                    if (aotLayer(coc) == 0 .OR. aotLayer(coc) == iSmooth + 1) then
+                      aotLayer(coc) = iSmooth + 1
+                      aotCounterOffset = dcEdge(eoc)
+                      !counter_cells = counter_cells + 1
+                      do k = 1, maxLevelCell(iCell)
+                        cellArray(k,coc) = (cellArray(k,coc)*counter_cells(coc) &
+                                                     + cellArray(k,iCell))/(counter_cells(coc)+aotCounterOffset)
+                      enddo !k
+                      counter_cells(coc) = counter_cells(coc) + aotCounterOffset
+                    endif !aotLayer(coc)
+                  endif !coc
+                enddo !j
+              endif !aotLayer(iCell)
+            enddo !iCell
+          enddo !iSmooth
+        endif
+
+        cellArrayNew = cellArray
+  ! Initialize vertical counter
+  
+        ! Once data has been initialized apply iterated averaging to smooth it
+        if(config_aot_interp_weight == "constant") then
+          aotCounterOffset = 1
+          do iSmooth = 1, config_aot_smoothing_iterations
+            do iCell = 1, nCells
+              if (aotForcingMask(iCell) == 0) then
+                do k = 1, maxLevelCell(iCell)
+                  cellArrayNew(k,iCell) = cellArray(k,iCell)
+                enddo !k
+                counter_layers = 1
+                do j = 1, nEdgesOnCell(iCell)
+                  coc = cellsOnCell(j,iCell)
+                  if (coc < nCells+1 ) then
+                      do k = 1, min(maxLevelCell(iCell), maxLevelCell(coc))
+                          cellArrayNew(k,iCell) = cellArrayNew(k,iCell) + cellArray(k,coc)
+                          counter_layers(k) = counter_layers(k) + aotCounterOffset
+                      enddo !k
+                  endif !coc
+                enddo !j
+                do k = 1, maxLevelCell(iCell)
+                  cellArrayNew(k,iCell) = cellArrayNew(k,iCell)/counter_layers(k)
+                enddo !k
+              endif !aotLayer(iCell)
+            enddo !iCell
+            cellArray = cellArrayNew
+          enddo !iSmooth
+  
+  !! replace aotCounter in smoothing with aotCounter_depth that is reset 
+  
+        else if(config_aot_interp_weight == "geometric") then
+          do iSmooth = 1, config_aot_smoothing_iterations
+            do iCell = 1, nCells
+              if (aotForcingMask(iCell) == 0) then
+                do k = 1, maxLevelCell(iCell)
+                  cellArrayNew(k,iCell) = cellArray(k,iCell)
+                enddo !k
+                counter_layers(:) = 0
+                do j = 1, nEdgesOnCell(iCell)
+                  coc = cellsOnCell(j,iCell)
+                  eoc = edgesOnCell(j,iCell)
+                  if (coc < nCells+1) then
+                    aotCounterOffset = dcEdge(eoc)
+                    do k = 1, min(maxLevelCell(coc),maxLevelCell(iCell))
+                      cellArrayNew(k,iCell) = cellArrayNew(k,iCell) + cellArray(k,coc)
+                      counter_layers(k) = counter_layers(k) + aotCounterOffset
+                    enddo !k
+                  endif !coc
+                enddo !j
+                do k = 1, maxLevelCell(iCell)
+                  cellArrayNew(k,iCell) = cellArrayNew(k,iCell)/counter_layers(k)
+                enddo !k
+              endif !aotLayer(iCell)
+            enddo !iCell
+            cellArray = cellArrayNew
+          enddo !iSmooth
+        endif
+  
+        deallocate( aotLayer, counter_cells, counter_layers, cellArrayNew)
+  
+  
+  
+  
+  !      call mpas_log_write("Testing observational data loading: $r", MPAS_LOG_WARN, realArgs=(/ velocityZonalObs(1,1,1)))
+   end subroutine calculate_cell!}}}
+
+
+   subroutine cell_to_edge(edgeArray, meridionalCell, zonalCell, err) !{{{
+
+      real (kind=RKIND), dimension(:,:), intent(inout) :: &
+         edgeArray            !< [inout] accumulated velocity tendency
+      real (kind=RKIND), dimension(:,:), pointer :: &
+         meridionalCell,    & !< [inout] accumulated velocity tendency
+         zonalCell            !< [inout] accumulated velocity tendency
+
+
+      integer, intent(out) :: err !< [out] error flag
+
+      integer :: &
+         iEdge,      &! loop index for edge loop
+         k,          &! vertical index of lowest active layer at edge
+         cell1, cell2 ! neighbor cell addresses across edge
+
+      err = 0
+#ifdef MPAS_OPENACC
+        !$acc parallel loop &
+        !$acc    present(cellsOnEdge, tend, latCell,&
+        !$acc            velocityMeridionalAOT, velocityZonalAOT) &
+        !$acc    private(k, cell1, cell2)
+#else
+        !$omp parallel
+        !$omp do schedule(runtime) private(, cell1, cell2)
+#endif
+        do iEdge = 1, nEdgesOwned
+          cell1 = cellsOnEdge(1,iEdge)
+          cell2 = cellsOnEdge(2,iEdge)
+  !        k =  maxLevelEdgeTop(iEdge)
+          if (latCell(cell1)<=1.2217 .AND. latCell(cell2) <=1.2217) then
+            do k = 1, maxLevelEdgeTop(iEdge)
+  !        if (k > 0) then
+  !           tend(k,iEdge) = tend(k,iEdge) - aot_coeff_vel* &
+  !                           sqrt(KECell(k,cell1) + KECell(k,cell2))* &
+  !                           normVelocity(k,iEdge)/layerThickEdge(k,iEdge)
+  !        end if
+              edgeArray(k,iEdge) =  (  sin(angleEdge(iEdge)) * (0.5*(meridionalCell(k,cell1) + meridionalCell(k,cell2))) + &
+                   cos(angleEdge(iEdge)) * (0.5*(zonalCell(k,cell1) + zonalCell(k,cell2)))     )
+            enddo
+          end if
+        enddo
+#ifndef MPAS_OPENACC
+        !$omp end do
+        !$omp end parallel
+#endif
+
+
+   end subroutine cell_to_edge!}}}
 !***********************************************************************
 !
 !  routine ocn_vel_forcing_AOT_init

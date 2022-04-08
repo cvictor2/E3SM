@@ -1003,6 +1003,10 @@
 					description="If true, AOT forcing is used on the momentum equation."
 					possible_values=".true. or .false."
 		/>
+		<nml_option name="config_aot_scheme" type="character" default_value="explicit" units="unitless"
+					description="Handle aot term implicitly or explicitly."
+					possible_values="'explicit' or 'implicit'"
+		/>
 		<nml_option name="config_use_aot_salt" type="logical" default_value=".false." units="unitless"
 					description="If true, AOT forcing is used on the tracers salinity equation."
 					possible_values=".true. or .false."

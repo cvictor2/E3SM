@@ -1852,7 +1852,7 @@ module ocn_time_integration_split
             !$omp end parallel
 
             write(*,*) "Started AOT term generation"
-            if(config_use_aot_vel .and. not(config_aot_obs_gen)) then
+            if(config_use_aot_vel .and. .not. config_aot_obs_gen) then
             call ocn_aot_forcing_vel(timeVaryingForcingPool, normalVelocityNew, statePool, forcingPool, aotVel, err)
             select case (trim(config_aot_scheme))
             case('implicit')

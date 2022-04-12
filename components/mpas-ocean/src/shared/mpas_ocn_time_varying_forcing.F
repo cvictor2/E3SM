@@ -612,9 +612,9 @@ contains
          config_time_varying_aot_forcing_start_time, &            ! startTimeStr
          config_time_varying_aot_forcing_cycle_start, &           ! forcingCycleStart
          config_time_varying_aot_forcing_cycle_duration, &        ! forcingCycleDuration
-         config_do_restart)!, &                  ! restart
+         .false.)!, &                  ! restart
          !.false.)                               ! forcingCycleStartInclusive
-    
+    if (config_use_aot_vel) then 
     select case (trim(config_time_varying_aot_data_type))
     case ('edges')
     ! normalVelocityObs init
@@ -628,8 +628,8 @@ contains
          "normalVelocityObs", &                         ! fieldname
          config_time_varying_aot_forcing_type, &                             ! interpolationType
          config_time_varying_aot_forcing_reference_time, &                 ! forcingReferenceTimeStr
-         config_time_varying_aot_forcing_interval, &                      ! forcingIntervalStr
-         "next")                                ! forcingInitializationType
+         config_time_varying_aot_forcing_interval)!, &                      ! forcingIntervalStr
+!         "next")                                ! forcingInitializationType
 
     case ('cells')
       ! velocityZonalObs init
@@ -704,7 +704,7 @@ contains
     
     
     end select
-
+    endif
     
     if (config_use_aot_salt) then
     ! salinityObs init
@@ -742,7 +742,7 @@ contains
          forcingGroupHead, &                     ! forcingGroupHead
          "ocn_aot_forcing", &            ! forcingGroupName
          domain % streamManager, &               ! streamManager
-         config_do_restart, &                    ! restart
+         .false., &                    ! restart
          .false.)                                ! interpolateAtInit
     ! aotPressure init
     !write (*,*) "Finished initializing AOT forcing."
@@ -786,6 +786,7 @@ contains
     
     !don't try to update data from stream if disabled
     if (config_aot_obs_gen) return
+    if (.not. config_use_aot_vel .and. .not. config_use_aot_salt .and. .not. config_use_aot_temp) return
     ! convert config_dt to real
     call mpas_set_timeInterval(timeStepESMF, timeString=config_dt,ierr=err)
     call mpas_get_timeInterval(timeStepESMF, dt=dtSim)

@@ -41,6 +41,10 @@ module ocn_time_integration_rk4
 
    use ocn_effective_density_in_land_ice
 
+   use ocn_aot
+   use ocn_time_varying_forcing
+   use ocn_config
+   use ocn_mesh
    implicit none
    private
    save
@@ -1204,11 +1208,12 @@ module ocn_time_integration_rk4
       real (kind=RKIND), intent(in) :: rkWeight
       integer, intent(out) :: err
 
-      integer, pointer :: nCells, nEdges
+      integer, pointer :: nCells, nEdges, nVertLevels
       integer :: iCell, iEdge, k
 
       type (mpas_pool_type), pointer :: statePool, tendPool, meshPool
       type (mpas_pool_type), pointer :: tracersPool, tracersTendPool
+      type (mpas_pool_type), pointer ::  timeVaryingForcingPool, forcingPool
 
       real (kind=RKIND), dimension(:, :), pointer :: normalVelocityNew, normalVelocityTend
       real (kind=RKIND), dimension(:, :), pointer :: layerThicknessNew, layerThicknessTend
@@ -1224,10 +1229,15 @@ module ocn_time_integration_rk4
       character (len=StrKIND) :: modifiedGroupName
       character (len=StrKIND) :: configName
 
+      real (kind=RKIND) :: aotDiv
+
+      real (kind=RKIND), dimension(:,:), pointer :: &
+         aotVel                  ! baroclinic vel at current time
       err = 0
 
       call mpas_pool_get_dimension(block % dimensions, 'nCells', nCells)
       call mpas_pool_get_dimension(block % dimensions, 'nEdges', nEdges)
+      call mpas_pool_get_dimension(block % dimensions, 'nVertLevels', nVertLevels)
 
       call mpas_pool_get_subpool(block % structs, 'state', statePool)
       call mpas_pool_get_subpool(block % structs, 'tend', tendPool)
@@ -1236,6 +1246,8 @@ module ocn_time_integration_rk4
       call mpas_pool_get_subpool(statePool, 'tracers', tracersPool)
       call mpas_pool_get_subpool(tendPool, 'tracersTend', tracersTendPool)
 
+      call mpas_pool_get_subpool(block % structs, 'forcing', forcingPool)
+      call mpas_pool_get_subpool(block % structs, 'timeVaryingForcing', timeVaryingForcingPool)
       !call mpas_pool_get_array(statePool, 'normalVelocity', normalVelocityCur, 1)
       !call mpas_pool_get_array(statePool, 'layerThickness', layerThicknessCur, 1)
       !call mpas_pool_get_array(statePool, 'highFreqThickness', highFreqThicknessCur, 1)
@@ -1268,9 +1280,36 @@ module ocn_time_integration_rk4
       do iEdge = 1, nEdges
          normalVelocityNew(:, iEdge) = normalVelocityNew(:, iEdge) + rkWeight * normalVelocityTend(:, iEdge)
          normalVelocityNew(:, iEdge) = normalVelocityNew(:, iEdge) * (1.0_RKIND - wettingVelocity(:, iEdge))
+!! Add implicit AOT term here.
       end do
       !$omp end do
       !$omp end parallel
+
+      if(config_use_aot_vel .and. .not. config_aot_obs_gen) then
+      allocate(aotVel(nVertLevels, nEdgesAll+1))
+      call ocn_aot_forcing_vel(timeVaryingForcingPool, normalVelocityNew, statePool, forcingPool, aotVel, err)
+      select case (trim(config_aot_scheme))
+      case('implicit')
+        aotDiv = 1.0_RKIND/(1.0_RKIND + rkWeight*6*config_aot_coeff_vel) 
+      case('explicit')
+        aotDiv = 1.0_RKIND
+      endselect
+
+      !$omp parallel
+      !$omp do schedule(runtime) private(k)
+      do iEdge = 1, nEdgesAll
+      do k = minLevelEdgeBot(iEdge), maxLevelEdgeTop(iEdge)
+         normalVelocityNew(k,iEdge) = (normalVelocityNew(k,iEdge) + rkWeight*6*config_aot_coeff_vel*aotVel(k,iEdge))*aotDiv
+      end do
+      end do ! iEdges
+      !$omp end do
+      !$omp end parallel
+      deallocate(aotVel)
+      endif
+
+      if(config_aot_obs_gen) then
+        call ocn_time_varying_forcing_aot_obs_update_vel(timeVaryingForcingPool, statePool)
+      endif
 
       call mpas_pool_begin_iteration(tracersPool)
       do while ( mpas_pool_get_next_member(tracersPool, groupItr) )
@@ -1290,6 +1329,7 @@ module ocn_time_integration_rk4
                      do k = minLevelCell(iCell), maxLevelCell(iCell)
                         tracersGroupNew(:, k, iCell) = tracersGroupNew(:, k, iCell) + rkWeight &
                                                 * tracersGroupTend(:, k, iCell)
+!! Add implicit AOT term here.
                      end do
                   end do
                   !$omp end do

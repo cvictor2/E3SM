@@ -1845,14 +1845,14 @@ module ocn_time_integration_split
                                normalBarotropicVelocityNew(iEdge) + &
                              2*normalBaroclinicVelocityNew(k,iEdge) - &
                                normalBaroclinicVelocityCur(k,iEdge)
-!Maybe here? AOT term
             end do
             end do ! iEdges
             !$omp end do
             !$omp end parallel
 
-            write(*,*) "Started AOT term generation"
+!            write(*,*) "Started AOT term generation"
             if(config_use_aot_vel .and. .not. config_aot_obs_gen) then
+            allocate(aotVel(nVertLevels, nEdgesAll+1))
             call ocn_aot_forcing_vel(timeVaryingForcingPool, normalVelocityNew, statePool, forcingPool, aotVel, err)
             select case (trim(config_aot_scheme))
             case('implicit')
@@ -1861,7 +1861,7 @@ module ocn_time_integration_split
               aotDiv = 1.0_RKIND
             endselect
 
-            write(*,*) "Finished AOT term generation, applying term."
+!            write(*,*) "Finished AOT term generation, applying term."
             !$omp parallel
             !$omp do schedule(runtime) private(k)
             do iEdge = 1, nEdgesAll
@@ -1871,9 +1871,10 @@ module ocn_time_integration_split
             end do ! iEdges
             !$omp end do
             !$omp end parallel
+            deallocate(aotVel)
             endif
 
-            write(*,*) "Finished applying AOT term."
+!            write(*,*) "Finished applying AOT term."
             if(config_aot_obs_gen) then
               call ocn_time_varying_forcing_aot_obs_update_vel(timeVaryingForcingPool, statePool)
             endif

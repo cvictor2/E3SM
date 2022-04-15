@@ -540,12 +540,12 @@ contains
       select case (trim(config_time_varying_aot_data_type))
       case('cells')
       
-!        allocate(meridionalCell(nVertLevels,nCells))
-!        allocate(zonalCell(nVertLevels,nCells))
+        allocate(meridionalCell(nVertLevels,nCells))
+        allocate(zonalCell(nVertLevels,nCells))
         call calculate_cell(timeVaryingForcingPool, forcingPool, 'velocityMeridionalObs', velocityMeridional, meridionalCell, err)
         call calculate_cell(timeVaryingForcingPool, forcingPool, 'velocityZonalObs', velocityZonal, zonalCell, err)
         call cell_to_edge(edgeArray, meridionalCell, zonalCell, err)
-!        deallocate(meridionalCell, zonalCell)
+        deallocate(meridionalCell, zonalCell)
        case('edges')
         call mpas_pool_get_array(timeVaryingForcingPool, 'normalVelocityObs', normalVelocityObs)
         select case (trim(config_aot_scheme))
@@ -564,7 +564,41 @@ contains
    end subroutine ocn_aot_forcing_vel!}}}
 
 
+   subroutine ocn_aot_forcing_tracer(timeVaryingForcingPool,tracerArray,forcingPool,cellArray,tracerName, err) !{{{
+! If implicit, set aot_forcing_vel variable (whatever the name is) to normalVelocityObs and return
+! otherwise,  run cell_initialized(timeVaryingForcingPool, 'normalVelocityObs', aot_forcing_vel_cell, err)
+!             run cell_averaged(aot_forcing_vel)
+!             run cell_to_edge(aot_forcing_vel_cell, aot_forcing_vel)
+! aot_forcing_vel_cell is a pointer array with values per celll
+! Final result needs to be edge valued pointer array
+   !--------------------------------------------------------------------
 
+      type (mpas_pool_type), intent(in) :: timeVaryingForcingPool
+      type (mpas_pool_type), intent(in) :: forcingPool
+  
+      real (kind=RKIND), dimension(:,:), pointer,  intent(inout) :: &
+         cellArray            !< [inout] accumulated velocity tendency
+
+      integer, intent(out) :: err !< [out] error flag
+
+      real (kind=RKIND), dimension(:,:), pointer, intent(in) :: &
+         tracerArray      !< [in] tracer (salinity or temperature)
+
+
+
+      real (kind=RKIND), dimension(:,:), pointer :: tracerObs
+      
+      character (len=StrKIND), intent(in) :: tracerName
+      character (len=StrKIND) :: tracerNameObs
+      tracerNameObs = trim(tracerName) // trim("Obs")
+
+
+      err = 0
+
+      call calculate_cell(timeVaryingForcingPool, forcingPool, tracerNameObs, tracerArray, cellArray, err)
+      
+
+   end subroutine ocn_aot_forcing_tracer!}}}
 
    subroutine calculate_cell(timeVaryingForcingPool, forcingPool, forcingName, simCellArray, cellArray, err) !{{{
 
@@ -827,6 +861,10 @@ contains
   !        end if
               edgeArray(k,iEdge) =  (  sin(angleEdge(iEdge)) * (0.5*(meridionalCell(k,cell1) + meridionalCell(k,cell2))) + &
                    cos(angleEdge(iEdge)) * (0.5*(zonalCell(k,cell1) + zonalCell(k,cell2)))     )
+            enddo
+          else
+            do k = 1, maxLevelEdgeTop(iEdge)
+              edgeArray(k,iEdge) = 0
             enddo
           end if
         enddo

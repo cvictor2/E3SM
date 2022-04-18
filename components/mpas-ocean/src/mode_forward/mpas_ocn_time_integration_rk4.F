@@ -1219,6 +1219,7 @@ module ocn_time_integration_rk4
       real (kind=RKIND), dimension(:, :), pointer :: layerThicknessNew, layerThicknessTend
       real (kind=RKIND), dimension(:, :), pointer :: highFreqThicknessNew, highFreqThicknessTend
       real (kind=RKIND), dimension(:, :), pointer :: lowFreqDivergenceNew, lowFreqDivergenceTend
+      real (kind=RKIND), dimension(:,:,:), pointer, contiguous :: activeTracers
 
       real (kind=RKIND), dimension(:, :, :), pointer :: tracersGroupNew, tracersGroupTend
 
@@ -1231,8 +1232,9 @@ module ocn_time_integration_rk4
 
       real (kind=RKIND) :: aotDiv
 
-      real (kind=RKIND), dimension(:,:), pointer :: &
-         aotVel                  ! baroclinic vel at current time
+      real (kind=RKIND), dimension(:,:), pointer :: aotTerm_Vel ! baroclinic vel at current time
+      real (kind=RKIND), dimension(:,:,:), pointer :: aotTerm_Tracers ! baroclinic vel at current time
+      integer, pointer :: indexTemperature, indexSalinity
       err = 0
 
       call mpas_pool_get_dimension(block % dimensions, 'nCells', nCells)
@@ -1267,6 +1269,10 @@ module ocn_time_integration_rk4
       call mpas_pool_get_array(meshPool, 'minLevelCell', minLevelCell)
       call mpas_pool_get_array(meshPool, 'maxLevelCell', maxLevelCell)
 
+      call mpas_pool_get_array(tracersPool, 'activeTracers', activeTracers, 1)
+      call mpas_pool_get_dimension(tracersPool, 'index_temperature', indexTemperature)
+      call mpas_pool_get_dimension(tracersPool, 'index_salinity', indexSalinity)
+
       !$omp parallel
       !$omp do schedule(runtime) private(k)
       do iCell = 1, nCells
@@ -1286,8 +1292,8 @@ module ocn_time_integration_rk4
       !$omp end parallel
 
       if(config_use_aot_vel .and. .not. config_aot_obs_gen) then
-      allocate(aotVel(nVertLevels, nEdgesAll+1))
-      call ocn_aot_forcing_vel(timeVaryingForcingPool, normalVelocityNew, statePool, forcingPool, aotVel, err)
+      allocate(aotTerm_Vel(nVertLevels, nEdgesAll+1))
+      call ocn_aot_forcing_vel(timeVaryingForcingPool, normalVelocityNew, statePool, forcingPool, aotTerm_Vel, err)
       select case (trim(config_aot_scheme))
       case('implicit')
         aotDiv = 1.0_RKIND/(1.0_RKIND + rkWeight*6*config_aot_coeff_vel) 
@@ -1299,12 +1305,12 @@ module ocn_time_integration_rk4
       !$omp do schedule(runtime) private(k)
       do iEdge = 1, nEdgesAll
       do k = minLevelEdgeBot(iEdge), maxLevelEdgeTop(iEdge)
-         normalVelocityNew(k,iEdge) = (normalVelocityNew(k,iEdge) + rkWeight*6*config_aot_coeff_vel*aotVel(k,iEdge))*aotDiv
+         normalVelocityNew(k,iEdge) = (normalVelocityNew(k,iEdge) + rkWeight*6*config_aot_coeff_vel*aotTerm_Vel(k,iEdge))*aotDiv
       end do
       end do ! iEdges
       !$omp end do
       !$omp end parallel
-      deallocate(aotVel)
+      deallocate(aotTerm_Vel)
       endif
 
       if(config_aot_obs_gen) then
@@ -1339,6 +1345,44 @@ module ocn_time_integration_rk4
          end if
       end do
 
+      if(.not. config_aot_obs_gen) then
+      allocate(aotTerm_Tracers(2,nVertLevels, nCellsAll+1))
+      call ocn_aot_forcing_tracers(timeVaryingForcingPool, activeTracers, indexSalinity, indexTemperature, forcingPool, aotTerm_Tracers, err)
+      select case (trim(config_aot_scheme))
+      case('implicit')
+        aotDiv = 1.0_RKIND/(1.0_RKIND + rkWeight*6*config_aot_coeff_vel) 
+      case('explicit')
+        aotDiv = 1.0_RKIND
+      endselect
+      if(config_use_aot_salt) then
+      !$omp parallel
+      !$omp do schedule(runtime) private(k)
+      do iCell = 1, nCells
+      do k = minLevelCell(iCell), maxLevelCell(iCell)
+         activeTracers(indexSalinity,k,iCell) = activeTracers(indexSalinity, k, iCell) + rkWeight*6*config_aot_coeff_vel*aotTerm_Tracers(1,k,iCell)*aotDiv
+      end do
+      end do ! iCell
+      !$omp end do
+      !$omp end parallel
+      endif
+      if(config_use_aot_temp) then
+      !$omp parallel
+      !$omp do schedule(runtime) private(k)
+      do iCell = 1, nCells
+      do k = minLevelCell(iCell), maxLevelCell(iCell)
+         activeTracers(indexTemperature,k,iCell) = activeTracers(indexTemperature, k, iCell) + rkWeight*6*config_aot_coeff_vel*aotTerm_Tracers(2,k,iCell)*aotDiv
+      end do
+      end do ! iCell
+      !$omp end do
+      !$omp end parallel
+      endif
+      deallocate(aotTerm_Tracers)
+      endif
+      
+
+      if(config_aot_obs_gen) then
+        call ocn_time_varying_forcing_aot_obs_update_tracers(timeVaryingForcingPool, activeTracers, indexSalinity, indexTemperature, nCells, minLevelCell, maxLevelCell, nVertLevels)
+      endif
       if (associated(highFreqThicknessNew)) then
          !$omp parallel
          !$omp do schedule(runtime) 

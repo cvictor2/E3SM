@@ -47,7 +47,8 @@ module ocn_aot
    public :: ocn_aot_vel_tend, &
              ocn_aot_tracers_tend, &
              ocn_vel_aot_init, &
-             ocn_aot_forcing_vel
+             ocn_aot_forcing_vel, &
+             ocn_aot_forcing_tracers
    !--------------------------------------------------------------------
    !
    ! Private module variables
@@ -530,8 +531,6 @@ contains
 
       real (kind=RKIND), dimension(:,:), pointer :: normalVelocityObs
       integer :: nCells
-      
-
 
       nCells = nCellsAll
 
@@ -556,6 +555,7 @@ contains
         endselect 
 
 
+      write(*,*) edgeArray(1,1:10)
 
       endselect
 
@@ -564,7 +564,7 @@ contains
    end subroutine ocn_aot_forcing_vel!}}}
 
 
-   subroutine ocn_aot_forcing_tracer(timeVaryingForcingPool,tracerArray,forcingPool,cellArray,tracerName, err) !{{{
+   subroutine ocn_aot_forcing_tracers(timeVaryingForcingPool,activeTracers,indSalt,indTemp, forcingPool, aotTracers, err) !{{{
 ! If implicit, set aot_forcing_vel variable (whatever the name is) to normalVelocityObs and return
 ! otherwise,  run cell_initialized(timeVaryingForcingPool, 'normalVelocityObs', aot_forcing_vel_cell, err)
 !             run cell_averaged(aot_forcing_vel)
@@ -576,29 +576,42 @@ contains
       type (mpas_pool_type), intent(in) :: timeVaryingForcingPool
       type (mpas_pool_type), intent(in) :: forcingPool
   
-      real (kind=RKIND), dimension(:,:), pointer,  intent(inout) :: &
-         cellArray            !< [inout] accumulated velocity tendency
+      real (kind=RKIND), dimension(:,:,:), pointer, intent(in) ::  activeTracers
+      real (kind=RKIND), dimension(:,:,:), pointer,  intent(inout) :: &
+         aotTracers            !< [inout] accumulated velocity tendency
 
       integer, intent(out) :: err !< [out] error flag
 
-      real (kind=RKIND), dimension(:,:), pointer, intent(in) :: &
-         tracerArray      !< [in] tracer (salinity or temperature)
-
-
-
-      real (kind=RKIND), dimension(:,:), pointer :: tracerObs
+      integer, intent(in) :: indSalt, indTemp
       
-      character (len=StrKIND), intent(in) :: tracerName
       character (len=StrKIND) :: tracerNameObs
-      tracerNameObs = trim(tracerName) // trim("Obs")
+      
+      real (kind=RKIND), dimension(:,:), pointer :: &
+        salinitySim, &
+        temperatureSim, &
+        cellTemp
+      integer :: nCells
+
+      nCells = nCellsAll
+      allocate(salinitySim(nVertLevels, nCells+1)) 
+      allocate(temperatureSim(nVertLevels, nCells+1)) 
+      salinitySim = activeTracers(indSalt,:,:)
+      temperatureSim = activeTracers(indTemp,:,:)
+
 
 
       err = 0
-
-      call calculate_cell(timeVaryingForcingPool, forcingPool, tracerNameObs, tracerArray, cellArray, err)
-      
-
-   end subroutine ocn_aot_forcing_tracer!}}}
+      allocate(cellTemp(nVertLevels, nCells+1))
+      if (config_use_aot_salt) then
+      call calculate_cell(timeVaryingForcingPool, forcingPool, 'salinityObs', salinitySim, cellTemp, err)
+      aotTracers(1,:,:) = cellTemp 
+      endif
+      if (config_use_aot_temp) then
+      call calculate_cell(timeVaryingForcingPool, forcingPool, 'temperatureObs', temperatureSim, cellTemp, err)
+      aotTracers(2,:,:) = cellTemp 
+      endif
+      deallocate(cellTemp, salinitySim, temperatureSim)
+   end subroutine ocn_aot_forcing_tracers!}}}
 
    subroutine calculate_cell(timeVaryingForcingPool, forcingPool, forcingName, simCellArray, cellArray, err) !{{{
 

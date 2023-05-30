@@ -43,8 +43,9 @@ module ocn_time_integration_split
    use ocn_time_average_coupled
 
    use ocn_effective_density_in_land_ice
-   use ocn_transport_tests
 
+   use ocn_aot
+   use ocn_time_varying_forcing
    implicit none
    private
    save
@@ -140,9 +141,9 @@ module ocn_time_integration_split
          tendPool,          &! structure holding tendencies
          tracersTendPool,   &! structure holding tracer tendencies
          forcingPool,       &! structure holding forcing variables
+         timeVaryingForcingPool,       &! structure holding forcing variables
          scratchPool,       &! structure holding temporary variables
-         swForcingPool,     &! structure holding short-wave forcing vars
-         tracersIdealAgeFieldsPool     ! structure holding idealAge-related fields
+         swForcingPool       ! structure holding short-wave forcing vars
 
       logical :: &
          activeTracersOnly   ! only compute tendencies for active tracers
@@ -209,8 +210,7 @@ module ocn_time_integration_split
          highFreqThicknessCur,        &! high frq thick at current time
          highFreqThicknessNew,        &! high frq thick at new     time
          lowFreqDivergenceCur,        &! low frq div    at current time
-         lowFreqDivergenceNew,        &! low frq div    at new     time
-         tracerGroupIdealAgeMask       ! mask for resetting surface ideal age
+         lowFreqDivergenceNew          ! low frq div    at new     time
 
       type (field1DReal), pointer :: &
          effectiveDensityField         ! field pointer for halo update
@@ -248,6 +248,12 @@ module ocn_time_integration_split
 
       ! Forcing pool
       real (kind=RKIND), dimension(:), pointer :: tidalPotentialEta
+
+
+      real (kind=RKIND) :: aotDiv
+
+      real (kind=RKIND), dimension(:,:), pointer :: &
+         aotVel                  ! baroclinic vel at current time
 
       ! These are public variables used from the diagnostics module
       ! indexSurfaceVelocityZonal, indexSurfaceVelocityMeridional
@@ -292,6 +298,8 @@ module ocn_time_integration_split
                                                  statePool)
       call mpas_pool_get_subpool(block%structs, 'forcing', &
                                                  forcingPool)
+      call mpas_pool_get_subpool(block%structs, 'timeVaryingForcing', &
+                                                 timeVaryingForcingPool)
       call mpas_pool_get_subpool(block%structs, 'shortwave', &
                                                  swForcingPool)
       call mpas_pool_get_subpool(block%structs, 'tend', &
@@ -356,13 +364,6 @@ module ocn_time_integration_split
                                           highFreqThicknessTend)
       call mpas_pool_get_array(tendPool, 'lowFreqDivergence', &
                                           lowFreqDivergenceTend)
-
-      if (config_transport_tests_flow_id > 0) then
-        ! This is a transport test. Write advection velocity from prescribed
-        ! flow field.
-        call ocn_transport_test_velocity(meshPool, daysSinceStartOfSim, &
-          0.5*dt, normalVelocityCur)
-      endif
 
       ! Initialize * variables that are used to compute baroclinic
       ! tendencies below.
@@ -539,33 +540,19 @@ module ocn_time_integration_split
          ! normalTransportVelocity) for momentum advection.
          ! Use the most recent time level available.
 
-#ifdef MPAS_OPENACC
-         !$acc enter data copyin(layerThicknessCur, normalVelocityCur, sshCur)
-         !$acc update device(layerThickEdge)
-#endif
          if (associated(highFreqThicknessNew)) then
-#ifdef MPAS_OPENACC
-            !$acc enter data copyin(highFreqThicknessNew)
-#endif
             call ocn_vert_transport_velocity_top(meshPool, &
-                 verticalMeshPool, layerThicknessCur, &
+                 verticalMeshPool, scratchPool, layerThicknessCur, &
                  layerThickEdge, normalVelocityCur, sshCur, dt, &
                  vertAleTransportTop, err, highFreqThicknessNew)
-#ifdef MPAS_OPENACC
-            !$acc exit data delete(highFreqThicknessNew)
-#endif
          else
             call ocn_vert_transport_velocity_top(meshPool, &
-                 verticalMeshPool, layerThicknessCur, &
+                 verticalMeshPool, scratchPool, layerThicknessCur, &
                  layerThickEdge, normalVelocityCur, sshCur, dt, &
                  vertAleTransportTop, err)
          endif
-#ifdef MPAS_OPENACC
-         !$acc exit data delete(layerThicknessCur, normalVelocityCur, sshCur)
-         !$acc update host(vertAleTransportTop)
-#endif
 
-         call ocn_tend_vel(tendPool, statePool, forcingPool, &
+         call ocn_tend_vel(tendPool, statePool, forcingPool, timeVaryingForcingPool, &
                            stage1_tend_time, dt)
 
          call mpas_timer_stop('se bcl vel tend')
@@ -1489,31 +1476,17 @@ module ocn_time_integration_split
          ! layerThickEdge because layerThickness has not yet
          ! been computed for time level 2.
          call mpas_timer_start('thick vert trans vel top')
-#ifdef MPAS_OPENACC
-         !$acc enter data copyin(layerThicknessCur, sshCur)
-         !$acc update device(layerThickEdge, normalTransportVelocity)
-#endif
          if (associated(highFreqThicknessNew)) then
-#ifdef MPAS_OPENACC
-            !$acc enter data copyin(highFreqThicknessNew)
-#endif
             call ocn_vert_transport_velocity_top(meshPool, &
-                 verticalMeshPool, layerThicknessCur, &
+                 verticalMeshPool, scratchPool, layerThicknessCur, &
                  layerThickEdge, normalTransportVelocity, sshCur, &
                  dt, vertAleTransportTop, err, highFreqThicknessNew)
-#ifdef MPAS_OPENACC
-            !$acc exit data delete(highFreqThicknessNew)
-#endif
          else
             call ocn_vert_transport_velocity_top(meshPool, &
-                 verticalMeshPool, layerThicknessCur, &
+                 verticalMeshPool, scratchPool, layerThicknessCur, &
                  layerThickEdge, normalTransportVelocity, sshCur, &
                  dt, vertAleTransportTop, err)
          endif
-#ifdef MPAS_OPENACC
-         !$acc exit data delete(layerThicknessCur, sshCur)
-         !$acc update host(vertAleTransportTop, normalTransportVelocity)
-#endif
          call mpas_timer_stop('thick vert trans vel top')
 
          call ocn_tend_thick(tendPool, forcingPool, meshPool)
@@ -1528,7 +1501,7 @@ module ocn_time_integration_split
          call mpas_timer_stop("se halo thickness")
 
          call mpas_timer_start('se tracer tend', .false.)
-         call ocn_tend_tracer(tendPool, statePool, forcingPool, &
+         call ocn_tend_tracer(tendPool, statePool, forcingPool, timeVaryingForcingPool, &
                               meshPool, swForcingPool, &
                               dt, activeTracersOnly, 2)
 
@@ -1772,6 +1745,7 @@ module ocn_time_integration_split
                         !$omp end do
                         !$omp end parallel
                      end if
+!!! Add AOT stuff for tracers here
 
                      ! Reset debugTracers to fixed value at the surface
                      if (trim(groupItr % memberName) == &
@@ -1876,6 +1850,35 @@ module ocn_time_integration_split
             !$omp end do
             !$omp end parallel
 
+!            write(*,*) "Started AOT term generation"
+            if(config_use_aot_vel .and. .not. config_aot_obs_gen) then
+            allocate(aotVel(nVertLevels, nEdgesAll+1))
+            call ocn_aot_forcing_vel(timeVaryingForcingPool, normalVelocityNew, statePool, forcingPool, aotVel, err)
+            select case (trim(config_aot_scheme))
+            case('implicit')
+              aotDiv = 1.0_RKIND/(1.0_RKIND + dt*config_aot_coeff_vel) 
+            case('explicit')
+              aotDiv = 1.0_RKIND
+            endselect
+
+!            write(*,*) "Finished AOT term generation, applying term."
+            !$omp parallel
+            !$omp do schedule(runtime) private(k)
+            do iEdge = 1, nEdgesAll
+            do k = minLevelEdgeBot(iEdge), maxLevelEdgeTop(iEdge)
+               normalVelocityNew(k,iEdge) = (normalVelocityNew(k,iEdge) + dt*config_aot_coeff_vel*aotVel(k,iEdge))*aotDiv
+            end do
+            end do ! iEdges
+            !$omp end do
+            !$omp end parallel
+            deallocate(aotVel)
+            endif
+
+!            write(*,*) "Finished applying AOT term."
+            if(config_aot_obs_gen) then
+              call ocn_time_varying_forcing_aot_obs_update_vel(timeVaryingForcingPool, statePool)
+            endif
+
          endif ! splitExplicitStep
 
          call mpas_timer_stop('se loop fini')
@@ -1927,34 +1930,10 @@ module ocn_time_integration_split
       call mpas_pool_begin_iteration(tracersPool)
       do while ( mpas_pool_get_next_member(tracersPool, groupItr) )
          if (groupItr%memberType == MPAS_POOL_FIELD) then
-
-            ! Reset iAge to zero where mask == 0
-            if (config_use_idealAgeTracers.and.trim(groupItr%memberName) == 'idealAgeTracers') then
-                call mpas_pool_get_array(tracersPool, &
-                                         groupItr%memberName, &
-                                         tracersGroupNew, 2)
-                call mpas_pool_get_subpool(forcingPool, &
-                                           'tracersIdealAgeFields', &
-                                            tracersIdealAgeFieldsPool)
-                call mpas_pool_get_array(tracersIdealAgeFieldsPool, &
-                                         'idealAgeTracersIdealAgeMask', &
-                                          tracerGroupIdealAgeMask)
-
-                !$omp parallel
-                !$omp do schedule(runtime)
-                do iCell = 1, nCellsOwned
-                   tracersGroupNew(1,1,iCell) = tracerGroupIdealAgeMask(1,iCell)*tracersGroupNew(1,1,iCell)
-                end do ! cells
-                !$omp end do
-                !$omp end parallel
-             endif
-
-            ! Halo update on all tracer groups
-            call mpas_dmpar_field_halo_exch(domain, groupItr%memberName, timeLevel=2)
-
+            call mpas_dmpar_field_halo_exch(domain, &
+                         groupItr%memberName, timeLevel=2)
          end if
       end do
-
       call mpas_timer_stop('se vmix halos')
 
       call mpas_timer_stop("se implicit vert mix")
